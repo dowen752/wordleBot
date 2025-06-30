@@ -3,6 +3,7 @@
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Paths;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Random;
 import java.util.Scanner;
@@ -20,7 +21,7 @@ class Wordle{
 
         String correct = words.get(random.nextInt(words.size()));
         String guess = "";
-
+        List<String> guessed = new ArrayList<>();
 
         System.out.println("WORDLE\n------\n");
         for(int round = 0; round < 6; round++){
@@ -38,7 +39,7 @@ class Wordle{
             // --------------
             // Start of check
             // --------------
-
+            
             
             for(int c = 0; c < 5; c++){  // Char is green if correct char in correct spot
                 if(guess.substring(c, c+1).equals(correct.substring(c, c+1))){
@@ -49,9 +50,12 @@ class Wordle{
                 }
                 else{
                     System.out.print(guess.substring(c, c+1));
+                    if(guessed.indexOf(guess.substring(c, c+1)) == -1){
+                        guessed.add(guess.substring(c, c+1));
+                    }
                 }
             }
-            System.out.println("");
+            System.out.println("\nUsed characters: " + guessed + "\n");
 
             if(guess.equals(correct)){
                 System.out.println("\nYOU WIN TWIN!!!!\n\n O_O");
