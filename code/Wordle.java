@@ -10,7 +10,7 @@ import java.util.Scanner;
 
 class Wordle{
     public static void main(String[] args) throws IOException {
-        List<String> words = Files.readAllLines(Paths.get("wordleInJava/code/words.txt"));
+        List<String> words = Files.readAllLines(Paths.get("code/words.txt"));
         Scanner scan = new Scanner(System.in);
         Random random = new Random();
         String GREEN = "\u001B[42m"; // Color codes for characters depending on if char is correct, in wrong spot, or not in the word
@@ -26,8 +26,11 @@ class Wordle{
         System.out.println("WORDLE\n------\n");
         for(int round = 0; round < 6; round++){
             System.out.println("Please guess.\n-------------");
+            System.out.flush();
             while(true){
-                guess = scan.nextLine().toUpperCase();
+                if(scan.hasNextLine()){
+                    guess = scan.nextLine().toUpperCase();
+                }
 
                 if(guess.length() == 5){
                     break;
@@ -50,9 +53,9 @@ class Wordle{
                 }
                 else{
                     System.out.print(guess.substring(c, c+1));
-                    if(guessed.indexOf(guess.substring(c, c+1)) == -1){
-                        guessed.add(guess.substring(c, c+1));
-                    }
+                }
+                if(guessed.indexOf(guess.substring(c, c+1)) == -1){
+                    guessed.add(guess.substring(c, c+1));
                 }
             }
             System.out.println("\nUsed characters: " + guessed + "\n");
