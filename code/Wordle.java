@@ -8,6 +8,10 @@ import java.util.List;
 import java.util.Random;
 import java.util.Scanner;
 
+
+// This is a simple Java implementation of a Wordle-like game.
+// The game randomly selects a 5-letter word from a file and allows the user to guess.
+
 class Wordle{
     public static void main(String[] args) throws IOException {
         List<String> words = Files.readAllLines(Paths.get("code/words.txt"));
