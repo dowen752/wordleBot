@@ -1,0 +1,8 @@
+WordleBot Accuracy Log
+
+7/26
+small dataset: 99.50%
+large dataset: 78.00%
+
+After switching for letter frequency analysis:
+large dataset: 81.00%, 85.50%, 84.00%

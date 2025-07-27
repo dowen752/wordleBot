@@ -19,7 +19,6 @@ class Wordle{
         Random random = new Random();
         String GREEN = "\u001B[42m"; // Color codes for characters depending on if char is correct, in wrong spot, or not in the word
         String YELLOW = "\u001B[43m";
-        String GRAY = "\u001B[100m";
         String RESET = "\u001B[0m";
 
 

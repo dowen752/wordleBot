@@ -3,29 +3,30 @@ import sys
 import random as rd
 import re
 
-# Start the Java Wordle process
 process = subprocess.Popen(
     ["java", "-cp", "code", "Wordle"],
     stdin=subprocess.PIPE,
     stdout=subprocess.PIPE,
     stderr=subprocess.PIPE,
     text=True,
-    bufsize=1  # line-buffered
+    bufsize=1
 )
 
-# Load words
 with open("code/words.txt") as file:
     wordlist = [word.strip() for word in file]
 
 possible_words = wordlist.copy()
 last_guess = None
 
-# Regex precompiled (avoids repeated compile cost)
-COLOR_PATTERN = re.compile(r'(\x1b\[\d{2}m)?([A-Z])(\x1b\[0m)?')
-
 def parse_feedback(line, guess):
+    # ANSI color codes from Java
+    GREEN = "\u001B[42m"
+    YELLOW = "\u001B[43m"
+    RESET = "\u001B[0m"
+    # Regex to extract colored letters
+    pattern = re.compile(r'(\x1b\[\d{2}m)?([A-Z])(\x1b\[0m)?')
     feedback = []
-    for match in COLOR_PATTERN.finditer(line):
+    for match in pattern.finditer(line):
         color = match.group(1)
         letter = match.group(2)
         if color == '\x1b[42m':
@@ -50,57 +51,27 @@ def filter_words(possible_words, guess, feedback):
                     match = False
                     break
             elif color == 'gray':
-                # Handle gray letters carefully (account for duplicates)
-                if letter in guess:
-                    allowed = sum(1 for j, (c, l) in enumerate(feedback)
-                                  if l == letter and c in ('green', 'yellow'))
-                    if word.count(letter) > allowed:
-                        match = False
-                        break
-                else:
-                    if letter in word:
-                        match = False
-                        break
+                if letter in word:
+                    match = False
+                    break
         if match:
             new_words.append(word)
     return new_words
 
-def compute_letter_counts(possible_words):
-    counts = {}
-    for w in possible_words:
-        for c in set(w):  # Only count each letter once per word
-            counts[c] = counts.get(c, 0) + 1
-    return counts
-
-def score_word(word, counts):
-    return sum(counts.get(c, 0) for c in set(word))
-
-def choose_best_guess(possible_words, wordlist):
-    if not possible_words:
-        return rd.choice(wordlist)
-    counts = compute_letter_counts(possible_words)
-    scored = [(score_word(word, counts), word) for word in possible_words]
-    scored.sort(reverse=True)
-    return scored[0][1]
-
-# Main game loop
 while True:
     line = process.stdout.readline()
     if not line:
         print("Wordle has completed, exiting.")
         sys.exit()
-
     print(line, end="")
-    sys.stdout.flush()  # Ensure prompt output appears
-
-    # Parse feedback when colors appear
     if last_guess and any(code in line for code in ["\x1b[42m", "\x1b[43m"]):
         feedback = parse_feedback(line, last_guess)
         possible_words = filter_words(possible_words, last_guess, feedback)
-
-    # Respond with a guess when prompted
     if "Please guess." in line:
-        guess = choose_best_guess(possible_words, wordlist)
+        if possible_words:
+            guess = rd.choice(possible_words)
+        else:
+            guess = rd.choice(wordlist)
         last_guess = guess
         process.stdin.write(guess + "\n")
-        process.stdin.flush()  # Ensure the Java process gets the input immediately
+        process.stdin.flush()
