@@ -19,6 +19,7 @@ with open("code/words.txt") as file:
 
 possible_words = wordlist.copy()
 last_guess = None
+used_letters = set()
 
 # Regex precompiled (avoids repeated compile cost)
 COLOR_PATTERN = re.compile(r'(\x1b\[\d{2}m)?([A-Z])(\x1b\[0m)?')
@@ -75,13 +76,30 @@ def compute_letter_counts(possible_words):
 def score_word(word, counts):
     return sum(counts.get(c, 0) for c in set(word))
 
-def choose_best_guess(possible_words, wordlist):
+def choose_best_guess(possible_words, wordlist, first=False):
     if not possible_words:
         return rd.choice(wordlist)
     counts = compute_letter_counts(possible_words)
-    scored = [(score_word(word, counts), word) for word in possible_words]
+    candidates = wordlist if first else possible_words
+    scored = [(score_word(word, counts), word) for word in candidates]
     scored.sort(reverse=True)
     return scored[0][1]
+
+def get_probe_word(possible_words, wordlist, used_letters):
+    # Find the set of all letters in possible_words not yet guessed
+    remaining_letters = set("".join(possible_words)) - used_letters
+    best_word = None
+    best_score = -1
+    for word in wordlist:
+        score = len(set(word) & remaining_letters)
+        if score > best_score:
+            best_score = score
+            best_word = word
+    return best_word
+
+def positions_with_variation(possible_words):
+    # Returns a list of positions (0-4) where possible_words differ
+    return [i for i in range(5) if len(set(word[i] for word in possible_words)) > 1]
 
 # Main game loop
 while True:
@@ -100,7 +118,22 @@ while True:
 
     # Respond with a guess when prompted
     if "Please guess." in line:
-        guess = choose_best_guess(possible_words, wordlist)
+        if last_guess is None:
+            # First guess: maximize information
+            guess = choose_best_guess(possible_words, wordlist, first=True)
+        elif len(possible_words) == 1:
+            guess = possible_words[0]
+        else:
+            pos_var = positions_with_variation(possible_words)
+            # If only 1 or 2 positions vary and more than 2 possible words, probe!
+            if len(pos_var) <= 2 and len(possible_words) > 2:
+                guess = get_probe_word(possible_words, wordlist, used_letters)
+                # Avoid repeating a probe word or using a possible answer as probe
+                if guess in used_letters or guess in possible_words:
+                    guess = choose_best_guess(possible_words, wordlist)
+            else:
+                guess = choose_best_guess(possible_words, wordlist)
         last_guess = guess
+        used_letters.update(set(guess))
         process.stdin.write(guess + "\n")
         process.stdin.flush()  # Ensure the Java process gets the input immediately

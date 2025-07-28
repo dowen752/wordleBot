@@ -1,8 +1,5 @@
 import subprocess
 
-
-# runs WordleBot.py many times to test the bot's performance
-# prints the number of wins, losses, and success rate
 NUM_RUNS = 200
 wins = 0
 losses = 0

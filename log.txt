@@ -6,3 +6,7 @@ large dataset: 78.00%
 
 After switching for letter frequency analysis:
 large dataset: 81.00%, 85.50%, 84.00%
+
+Swapping solely best guess for using mix of best guess and information gathering
+
+large dataset: 86.50%, 90.0%, 90.0%
