@@ -4,9 +4,11 @@ from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 import time
+import os
 
 # --- WordleBot logic ---
-with open("code/words.txt") as file:
+words_path = os.path.join(os.path.dirname(__file__), "code", "words.txt")
+with open(words_path) as file:
     wordlist = [word.strip().upper() for word in file]
 
 possible_words = wordlist.copy()
