@@ -42,28 +42,59 @@ class Wordle{
                     System.out.println("Please input only 5 letter words.");
                 }
             }
+
             // --------------
             // Start of check
             // --------------
-            
-            
-            for(int c = 0; c < 5; c++){  // Char is green if correct char in correct spot
-                if(guess.substring(c, c+1).equals(correct.substring(c, c+1))){
-                    System.out.print(GREEN + guess.substring(c, c+1) + RESET);
+
+            // Count letters in answer
+            int[] answerCounts = new int[26];
+            for (int i = 0; i < 5; i++) {
+                char ch = correct.charAt(i);
+                answerCounts[ch - 'A']++;
+            }
+
+            // First pass: default all to B
+            char[] feedback = new char[5];
+            for (int i = 0; i < 5; i++) {
+                feedback[i] = 'B';
+            }
+
+            // First pass: mark greens
+            for (int i = 0; i < 5; i++) {
+                if (guess.charAt(i) == correct.charAt(i)) {
+                    feedback[i] = 'G';
+                    answerCounts[guess.charAt(i) - 'A']--;
                 }
-                else if(correct.indexOf(guess.substring(c, c+1)) > -1){
-                    System.out.print(YELLOW + guess.substring(c, c+1) + RESET);
+            }
+
+            // Second pass: mark yellows
+            for (int i = 0; i < 5; i++) {
+                if (feedback[i] == 'G') continue;
+                char gch = guess.charAt(i);
+                if (answerCounts[gch - 'A'] > 0) {
+                    feedback[i] = 'Y';
+                    answerCounts[gch - 'A']--;
                 }
-                else{
-                    System.out.print(guess.substring(c, c+1));
+            }
+
+            // Print colored feedback
+            for (int i = 0; i < 5; i++) {
+                char ch = guess.charAt(i);
+                if (feedback[i] == 'G') {
+                    System.out.print(GREEN + ch + RESET);
+                } else if (feedback[i] == 'Y') {
+                    System.out.print(YELLOW + ch + RESET);
+                } else {
+                    System.out.print(ch);
                 }
-                if(guessed.indexOf(guess.substring(c, c+1)) == -1){
-                    guessed.add(guess.substring(c, c+1));
+                if (guessed.indexOf("" + ch) == -1) {
+                    guessed.add("" + ch);
                 }
             }
             System.out.println("\nUsed characters: " + guessed + "\n");
 
-            if(guess.equals(correct)){
+            if (guess.equals(correct)) {
                 System.out.println("\nYOU WIN TWIN!!!!\n\n O_O");
                 break;
             }

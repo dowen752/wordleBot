@@ -1,6 +1,6 @@
 import subprocess
 
-NUM_RUNS = 200
+NUM_RUNS = 100
 wins = 0
 losses = 0
 

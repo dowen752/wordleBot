@@ -1,158 +1,266 @@
-import subprocess
-import sys
-import os
-import re
-import math
-from collections import Counter, defaultdict
+import os, sys, time, random, re, shlex, subprocess, string
+from typing import List, Dict, Tuple, Optional
+from dataclasses import dataclass, field
 
-# --- Start the Java Wordle process ---
-process = subprocess.Popen(
-    ["java", "-cp", "code", "Wordle"],
-    stdin=subprocess.PIPE,
-    stdout=subprocess.PIPE,
-    stderr=subprocess.PIPE,
-    text=True,
-    bufsize=1,
-    cwd=os.path.dirname(__file__)
-)
+try:
+    import numpy as np
+    from sklearn.linear_model import LogisticRegression
+    SK_OK = True
+except Exception:
+    SK_OK = False
+    np = None
 
-# --- Load words ---
-words_path = os.path.join(os.path.dirname(__file__), "code", "words.txt")
-with open(words_path) as file:
-    wordlist = [word.strip().upper() for word in file]
+ALPHABET = string.ascii_lowercase
+LETTER_IDX = {ch: i for i, ch in enumerate(ALPHABET)}
 
-possible_words = wordlist.copy()
-last_guess = None
-used_letters = set()
+def load_words(path: str, length: int = 5) -> List[str]:
+    with open(path, 'r', encoding='utf-8') as f:
+        words = [w.strip().lower() for w in f if w.strip()]
+    words = [w for w in words if len(w) == length and all(c in ALPHABET for c in w)]
+    return sorted(set(words))
 
-COLOR_PATTERN = re.compile(r'(\x1b\[\d{2}m)?([A-Z])(\x1b\[0m)?')
+def letter_freq(words: List[str]) -> Dict[str, float]:
+    counts = {c: 1.0 for c in ALPHABET}
+    for w in words:
+        for c in set(w):
+            counts[c] += 1.0
+    total = sum(counts.values())
+    return {c: counts[c]/total for c in ALPHABET}
 
-def parse_feedback(line):
-    feedback = []
-    for match in COLOR_PATTERN.finditer(line):
-        color = match.group(1)
-        letter = match.group(2)
-        if color == '\x1b[42m':
-            feedback.append(('green', letter))
-        elif color == '\x1b[43m':
-            feedback.append(('yellow', letter))
+# Constraints
+# -----------
+
+
+@dataclass
+class Constraint:
+    greens: Dict[int,str] = field(default_factory=dict)
+    yellows: Dict[str,List[int]] = field(default_factory=dict)
+    min_counts: Dict[str,int] = field(default_factory=dict)
+    max_counts: Dict[str,int] = field(default_factory=dict)
+
+    def allows(self, word:str) -> bool:
+        for i,ch in self.greens.items():
+            if word[i]!=ch: return False
+        for ch,bads in self.yellows.items():
+            if ch not in word: return False
+            if any(word[i]==ch for i in bads): return False
+        for ch,m in self.min_counts.items():
+            if word.count(ch)<m: return False
+        for ch,mx in self.max_counts.items():
+            if word.count(ch)>mx: return False
+        return True
+
+def apply_feedback(con: Constraint, guess: str, mask: str) -> Constraint:
+    guess = guess.lower()
+    mask = mask.upper()
+    need_counts = {}
+    not_in_positions = {}
+
+    # First pass: count greens/yellows and their positions
+    for i, (gch, m) in enumerate(zip(guess, mask)):
+        if m == 'G':
+            con.greens[i] = gch
+            need_counts[gch] = need_counts.get(gch, 0) + 1
+        elif m == 'Y':
+            not_in_positions.setdefault(gch, []).append(i)
+            need_counts[gch] = need_counts.get(gch, 0) + 1
+
+    # Second pass: set max_counts for 'B' letters
+    for i, (gch, m) in enumerate(zip(guess, mask)):
+        if m == 'B':
+            # If the letter is never green/yellow in this guess, it must not appear at all
+            if gch not in need_counts:
+                con.max_counts[gch] = 0
+            else:
+                # If the letter is green/yellow elsewhere, max is the number of green/yellow
+                con.max_counts[gch] = need_counts[gch]
+
+    # Update yellow positions
+    for ch, bads in not_in_positions.items():
+        con.yellows.setdefault(ch, [])
+        for i in bads:
+            if i not in con.yellows[ch]:
+                con.yellows[ch].append(i)
+
+    # Update min_counts
+    for ch, m in need_counts.items():
+        con.min_counts[ch] = max(con.min_counts.get(ch, 0), m)
+
+    return con
+
+# Feedback parsing
+# ----------------
+
+ANSI_RE = re.compile(r'\x1b\[(3\d|4\d)m([A-Za-z])\x1b\[0m')
+MASK_RE = re.compile(r'([GYB]{5})')
+
+def parse_feedback_line(line: str) -> Optional[str]:
+    # Try to match a mask first
+    m = MASK_RE.search(line)
+    if m:
+        s = m.group(1).upper()
+        if len(s) == 5: return s
+
+    # Now handle a line with a mix of colored and uncolored letters
+    # This will parse the feedback line from Java
+    # Example: '\x1b[42mA\x1b[0m\x1b[43mE\x1b[0mR\x1b[43mO\x1b[0mS'
+    mask = []
+    i = 0
+    while i < len(line):
+        if line[i:i+2] == '\x1b[':
+            # It's a color code
+            end = line.find('m', i)
+            color_code = line[i+2:end]
+            letter = line[end+1]
+            if color_code in ('32', '42'):
+                mask.append('G')
+            elif color_code in ('33', '43'):
+                mask.append('Y')
+            else:
+                mask.append('B')
+            i = end + 2  # Skip past 'm' and the letter
+            # Skip the reset code if present
+            if line[i:i+4] == '\x1b[0m':
+                i += 4
+        elif line[i].isalpha():
+            # Uncolored letter = gray
+            mask.append('B')
+            i += 1
         else:
-            feedback.append(('gray', letter))
-    return feedback
+            i += 1
+        if len(mask) == 5:
+            return ''.join(mask)
+    return None
 
-def feedback_pattern(guess: str, answer: str) -> str:
-    res = ['B'] * 5
-    a_counts = Counter(answer)
-    for i, (g, a) in enumerate(zip(guess, answer)):
-        if g == a:
-            res[i] = 'G'
-            a_counts[g] -= 1
-    for i, g in enumerate(guess):
-        if res[i] == 'G':
-            continue
-        if a_counts[g] > 0:
-            res[i] = 'Y'
-            a_counts[g] -= 1
-    return ''.join(res)
+def featurize(words:List[str])->"np.ndarray":
+    n=len(words); X=np.zeros((n,5*26+26),dtype=np.float32)
+    for r,w in enumerate(words):
+        for i,ch in enumerate(w):
+            X[r,i*26+LETTER_IDX[ch]]=1.0
+        for ch in w:
+            X[r,5*26+LETTER_IDX[ch]]+=1.0
+        X[r,5*26:]=np.minimum(X[r,5*26:],2.0)
+    return X
 
-def filter_words(possible_words, guess, feedback):
-    # Build sets for green, yellow, and gray letters
-    green_positions = {}
-    yellow_letters = set()
-    gray_letters = set()
-    for i, (color, letter) in enumerate(feedback):
-        if color == 'green':
-            green_positions[i] = letter
-        elif color == 'yellow':
-            yellow_letters.add(letter)
-        elif color == 'gray':
-            gray_letters.add(letter)
+# Scoring
+# -------
 
-    # Only keep gray letters that are not also green/yellow elsewhere
-    confirmed_letters = set(green_positions.values()) | yellow_letters
-    truly_gray = gray_letters - confirmed_letters
+def score_words_sklearn(cands:List[str], allw:List[str]):
+    neg=[w for w in allw if w not in cands]
+    n_pos=len(cands)
+    n_neg=min(len(neg), max(200, n_pos*3))
+    if n_pos == 0 or n_neg == 0:
+        # Not enough classes for logistic regression, fallback to frequency
+        return score_words_freq(cands, allw)
+    sample=random.sample(neg, n_neg) if n_neg>0 else []
+    train=cands+sample; y=[1]*len(cands)+[0]*len(sample)
+    X=featurize(train)
+    clf=LogisticRegression(max_iter=200,solver='saga')
+    clf.fit(X,y)
+    probs=clf.predict_proba(featurize(allw))[:,1]
+    return list(zip(allw,probs))
 
-    new_words = []
-    for word in possible_words:
-        match = True
-        # Green check
-        for i, letter in green_positions.items():
-            if word[i] != letter:
-                match = False
+def score_words_freq(cands:List[str], allw:List[str]):
+    f=letter_freq(cands if cands else allw); scores=[]
+    for w in allw:
+        score=sum(f.get(ch,0) for ch in set(w))
+        if w in cands: score*=1.1
+        scores.append((w,score))
+    return scores
+
+def pick_guess(scored,used:set)->str:
+    for w,_ in sorted(scored,key=lambda t:t[1],reverse=True):
+        if w not in used: return w
+    return scored[0][0]
+
+#  Game loop 
+# ----------
+
+def run_game(max_turns=6)->bool:
+    base=os.path.dirname(__file__)
+    code_dir=os.path.join(base,"code")
+    words_path=os.path.join(code_dir,"words.txt")
+    all_words=load_words(words_path)
+    cands=all_words.copy(); used=set(); con=Constraint()
+
+    proc=subprocess.Popen(
+        ["java","-cp","code","Wordle"],
+        stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.STDOUT,
+        text=True,bufsize=1,cwd=base
+    )
+    assert proc.stdin and proc.stdout
+
+    won=False
+    for turn in range(1, max_turns + 1):
+        # Wait for the "Please guess" prompt before making a guess
+        prompt_seen = False
+        lines = []
+        end = time.time() + 30  # up to 30 seconds to see the prompt
+        while time.time() < end:
+            line = proc.stdout.readline()
+            if not line:
                 break
-        # Yellow check
-        for i, (color, letter) in enumerate(feedback):
-            if color == 'yellow':
-                if letter not in word or word[i] == letter:
-                    match = False
+            lines.append(line)
+            print(f"[Game] {line.strip()}")
+            if "Please guess" in line:
+                prompt_seen = True
+                break
+        if not prompt_seen:
+            print("[Solver] Did not see 'Please guess' prompt, exiting.")
+            break
+
+        # Now make a guess
+        scored = score_words_sklearn(cands, all_words) if SK_OK else score_words_freq(cands, all_words)
+        guess = pick_guess(scored, used)
+        used.add(guess)
+        print(f"[Turn {turn}] Guess -> {guess.upper()}")
+        proc.stdin.write(guess + "\n")
+        proc.stdin.flush()
+
+        # Now read feedback as before
+        mask = None
+        lines = []
+        end = time.time() + 10  # up to 10 seconds per turn
+        while time.time() < end:
+            line = proc.stdout.readline()
+            if not line:
+                break
+            lines.append(line)
+            print(f"[Game] {line.strip()}")
+            parsed = parse_feedback_line(line)
+            if parsed:
+                mask = parsed
+                break
+        if not mask:
+            for line in lines:
+                parsed = parse_feedback_line(line)
+                if parsed:
+                    mask = parsed
                     break
-        # Gray check
-        for letter in truly_gray:
-            if letter in word:
-                match = False
+        if not mask:
+            print("[Solver] Could not parse feedback")
+            break
+        print(f"[Turn {turn}] Feedback mask: {mask}")
+        if mask == "GGGGG":
+            won = True
+            print(f"[Solver] Solved in {turn} turns with {guess.upper()}")
+            break
+        con = apply_feedback(con, guess, mask)
+        cands = [w for w in cands if con.allows(w)]
+        print(f"[Solver] Candidates remaining: {len(cands)}")
+        if not cands:
+            cands = all_words.copy()
+    # Wait for the Java process to finish and print the answer
+    try:
+        while True:
+            line = proc.stdout.readline()
+            if not line:
                 break
-        if match:
-            new_words.append(word)
-    return new_words
+            print(f"[Game] {line.strip()}")
+    except Exception:
+        pass
+    proc.terminate()
+    return won
 
-def guess_entropy(guess, candidates):
-    bucket = defaultdict(int)
-    n = len(candidates)
-    for ans in candidates:
-        pat = feedback_pattern(guess, ans)
-        bucket[pat] += 1
-    H = 0.0
-    for cnt in bucket.values():
-        p = cnt / n
-        H -= p * math.log2(p)
-    return H
-
-def choose_by_entropy(candidates, wordlist, allow_probe=True):
-    search_space = wordlist if allow_probe else candidates
-    best_guess, best_H = None, -1.0
-    for g in search_space:
-        H = guess_entropy(g, candidates)
-        if H > best_H or (H == best_H and g in candidates):
-            best_H, best_guess = H, g
-    return best_guess
-
-def choose_best_guess(possible_words, wordlist, first=False):
-    if first:
-        return "SALET"
-    n = len(possible_words)
-    if n <= 2:
-        return possible_words[0]
-    if n <= 100:
-        return choose_by_entropy(possible_words, wordlist, allow_probe=False)
-    return choose_by_entropy(possible_words, wordlist, allow_probe=True)
-
-while True:
-    line = process.stdout.readline()
-    if not line:
-        print("Wordle has completed, exiting.")
-        err = process.stderr.read()
-        if err:
-            print("Java error output:")
-            print(err)
-        sys.exit()
-
-    print(line, end="")
-    sys.stdout.flush()
-
-    # Parse feedback when colors appear
-    if last_guess and any(code in line for code in ["\x1b[42m", "\x1b[43m"]):
-        feedback = parse_feedback(line)
-        possible_words = filter_words(possible_words, last_guess, feedback)
-
-    # Respond with a guess when prompted
-    if "Please guess." in line:
-        if last_guess is None:
-            guess = choose_best_guess(possible_words, wordlist, first=True)
-        elif len(possible_words) == 1:
-            guess = possible_words[0]
-        else:
-            guess = choose_best_guess(possible_words, wordlist)
-        last_guess = guess
-        used_letters.update(set(guess))
-        process.stdin.write(guess + "\n")
-        process.stdin.flush()
+if __name__=="__main__":
+    ok=run_game(); sys.exit(0 if ok else 1)

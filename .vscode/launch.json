@@ -3,6 +3,13 @@
   "configurations": [
     {
       "type": "java",
+      "name": "Wordle",
+      "request": "launch",
+      "mainClass": "Wordle",
+      "projectName": "WordleBot_d2ed45ee"
+    },
+    {
+      "type": "java",
       "name": "Run Wordle",
       "request": "launch",
       "mainClass": "wordleInJava.Wordle",
