@@ -16,7 +16,6 @@ LETTER_IDX = {ch: i for i, ch in enumerate(ALPHABET)}
 def load_words(path: str, length: int = 5) -> List[str]:
     with open(path, 'r', encoding='utf-8') as f:
         words = [w.strip().lower() for w in f if w.strip()]
-    words = [w for w in words if len(w) == length and all(c in ALPHABET for c in w)]
     return sorted(set(words))
 
 def letter_freq(words: List[str]) -> Dict[str, float]:
@@ -173,6 +172,27 @@ def pick_guess(scored,used:set)->str:
         if w not in used: return w
     return scored[0][0]
 
+def pick_probe_word(cands: List[str], all_words: List[str], used: set) -> Optional[str]:
+    # Find all letters in positions that differ among candidates
+    differing_positions = []
+    for i in range(5):
+        letters = set(w[i] for w in cands)
+        if len(letters) > 1:
+            differing_positions.append((i, letters))
+    # Flatten all differing letters
+    probe_letters = set()
+    for i, letters in differing_positions:
+        probe_letters.update(letters)
+    # Score all words by how many probe_letters they cover (even if already ruled out)
+    best_word = None
+    best_score = -1
+    for w in all_words:
+        score = len(set(w) & probe_letters)
+        if score > best_score and w not in used:
+            best_score = score
+            best_word = w
+    return best_word
+
 #  Game loop 
 # ----------
 
@@ -209,9 +229,17 @@ def run_game(max_turns=6)->bool:
             print("[Solver] Did not see 'Please guess' prompt, exiting.")
             break
 
-        # Now make a guess
-        scored = score_words_sklearn(cands, all_words) if SK_OK else score_words_freq(cands, all_words)
-        guess = pick_guess(scored, used)
+        # Guessing
+        remaining_guesses = max_turns - turn + 1
+        if len(cands) > remaining_guesses and remaining_guesses > 1:
+            # Probe for information
+            guess = pick_probe_word(cands, all_words, used)
+            print(f"[Turn {turn}] Probe guess -> {guess.upper()}")
+        else:
+            # Standard guess
+            scored = score_words_sklearn(cands, all_words) if SK_OK else score_words_freq(cands, all_words)
+            guess = pick_guess(scored, used)
+        
         used.add(guess)
         print(f"[Turn {turn}] Guess -> {guess.upper()}")
         proc.stdin.write(guess + "\n")
@@ -257,6 +285,7 @@ def run_game(max_turns=6)->bool:
             if not line:
                 break
             print(f"[Game] {line.strip()}")
+        print(f"Remaining candidates: {cands}")
     except Exception:
         pass
     proc.terminate()
