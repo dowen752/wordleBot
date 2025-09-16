@@ -1,4 +1,5 @@
 import subprocess
+import re
 
 NUM_RUNS = 100
 wins = 0
@@ -12,11 +13,17 @@ for i in range(NUM_RUNS):
         text=True
     )
     output, _ = process.communicate()
+    
     if "YOU WIN TWIN!!!!" in output:
         wins += 1
+        match = re.search(r"Solved in 5 turns with (\w+)", output)
+        answer = match.group(1) if match else "N/A"
+        print(f"Game {i+1}: Win (Answer: {answer})")
     else:
         losses += 1
-    print(f"Game {i+1}: {'Win' if 'YOU WIN TWIN!!!!' in output else 'Loss'}")
+        match = re.search(r"The correct answer was: (\w+)", output)
+        answer = match.group(1) if match else "N/A"
+        print(f"Game {i+1}: Loss (Answer: {answer})")
 
 print(f"\nTotal games: {NUM_RUNS}")
 print(f"Wins: {wins}")
