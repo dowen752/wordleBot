@@ -1,3 +1,3 @@
 # wordleBot
-simple attempt at a bot that can play a homemade version of New York Time's Wordle.
+simple attempt at a bot that can play New York Time's Wordle game.
 currently at: 90.0% accuracy.
