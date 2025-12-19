@@ -4,13 +4,9 @@ from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 import time
-import os
-import math
-from collections import defaultdict, Counter
 
-# --- WordleBot logic ---
-words_path = os.path.join(os.path.dirname(__file__), "code", "words.txt")
-with open(words_path) as file:
+
+with open("code/words.txt") as file:
     wordlist = [word.strip().upper() for word in file]
 
 possible_words = wordlist.copy()
@@ -23,8 +19,15 @@ def compute_letter_counts(words):
     return counts
 
 def score_word(word, counts):
-    # Score by sum of unique letter frequencies
+    # scoring by sum of unique letter frequencies
     return sum(counts.get(c, 0) for c in set(word))
+
+def choose_best_guess(possible_words, wordlist, first=False):
+    counts = compute_letter_counts(possible_words)
+    candidates = wordlist if first else possible_words
+    scored = [(score_word(word, counts), word) for word in candidates]
+    scored.sort(reverse=True)
+    return scored[0][1]
 
 def get_probe_word(possible_words, wordlist, used_letters):
     # Find the set of all letters in possible_words not yet guessed
@@ -63,7 +66,7 @@ def filter_words(possible_words, guess, feedback):
     return new_words
 
 def get_feedback_from_board(driver, row_idx):
-    # Each tile in the row has data-state: 'correct', 'present', or 'absent'
+    # Each tile in the row has data-state correct, present, or absent
     row = driver.find_elements(By.CSS_SELECTOR, f'div[aria-label="Row {row_idx+1}"] div[data-testid="tile"]')
     feedback = []
     for tile in row:
@@ -77,69 +80,11 @@ def get_feedback_from_board(driver, row_idx):
             feedback.append(('gray', letter))
     return feedback
 
-# Adding Entropy Based Guessing Strategy
-def feedback_pattern(guess: str, answer: str) -> str:
-    res = ['B'] * 5
-    a_counts = Counter(answer)
-    for i, (g, a) in enumerate(zip(guess, answer)):
-        if g == a:
-            res[i] = 'G'
-            a_counts[g] -= 1
-    # Second pass for yellows
-    for i, g in enumerate(guess):
-        if res[i] == 'G':
-            continue
-        if a_counts[g] > 0:
-            res[i] = 'Y'
-            a_counts[g] -= 1
-    return ''.join(res)
 
-# Filter remaining candidates S given a played guess and its
-# feedback pattern
-def filter_candidates(candidates, guess, pattern):
-    out = []
-    for w in candidates:
-        if feedback_pattern(guess, w) == pattern:
-            out.append(w)
-    return out
-
-def guess_entropy(guess, candidates):
-    bucket = defaultdict(int)
-    n = len(candidates)
-    for ans in candidates:
-        pat = feedback_pattern(guess, ans)
-        bucket[pat] += 1
-    
-    H = 0.0
-    for cnt in bucket.values():
-        p = cnt / n
-        H -= p * math.log2(p)
-    return H
-
-def choose_by_entropy(candidates, wordlist, allow_probe=True):
-    search_space = wordlist if allow_probe else candidates
-    best_guess, best_H = None, -1
-    for g in search_space:
-        H = guess_entropy(g, candidates)
-        if H > best_H:
-            best_H = H
-            best_guess = g
-    return best_guess, best_H
-
-def choose_best_guess(possible_words, wordlist, first=False):
-    
-    allow_probe = first or len(possible_words) > 20
-    # setting to 20 as a threshold for when to allow probing
-    guess, H = choose_by_entropy(possible_words, wordlist, allow_probe=allow_probe)
-    return guess
-
-
-# --- Selenium setup ---
 driver = webdriver.Chrome()
 driver.get("https://www.nytimes.com/games/wordle/index.html")
 wait = WebDriverWait(driver, 15)
 
-# 1. Click "Play" button if present
 try:
     play_button = wait.until(
         EC.element_to_be_clickable((By.XPATH, "//button[contains(., 'Play') or contains(., 'No Thanks')]"))
@@ -149,7 +94,7 @@ try:
 except Exception:
     pass
 
-# 2. Close the tutorial overlay if present
+# Closing  tutorial overlay
 try:
     help_dialog = wait.until(
         EC.presence_of_element_located((By.ID, "help-dialog"))
@@ -164,17 +109,15 @@ actions = driver.find_element(By.TAG_NAME, "body")
 last_guess = None
 used_letters = set()
 
-for row_idx in range(6):
+for row_i in range(6):
     # Decide strategy
-    if row_idx == 0:
-        guess = "SALET" # Minimizes expected average word count, saves long computation for first word
+    if row_i == 0:
+        guess = choose_best_guess(possible_words, wordlist, first=True)
     elif len(possible_words) == 1:
         guess = possible_words[0]
     else:
-        # Check for "trap" situation: all possible words differ by only 1 or 2 letters
-        # Find positions with more than one unique letter
         positions_with_variation = [i for i in range(5) if len(set(word[i] for word in possible_words)) > 1]
-        # If only 1 or 2 positions vary, and there are more than 2 possible words, probe!
+        # If only 1 or 2 positions vary, and there are more than 2 possible words, probe
         if len(positions_with_variation) <= 2 and len(possible_words) > 2:
             guess = get_probe_word(possible_words, wordlist, used_letters)
             # Avoid repeating a probe word
@@ -188,10 +131,8 @@ for row_idx in range(6):
     actions.send_keys(Keys.RETURN)
     time.sleep(2.5)  # Wait for animation
 
-    feedback = get_feedback_from_board(driver, row_idx)
-    pattern = ''.join('G' if c == 'green' else 'Y' if c == 'yellow' else 'B' for c, _ in feedback)
-    possible_words = filter_candidates(possible_words, guess, pattern)
-    print(f"Guess {row_idx+1}: {guess} -> {feedback}")
+    feedback = get_feedback_from_board(driver, row_i)
+    print(f"Guess {row_i+1}: {guess} -> {feedback}")
 
     if all(color == 'green' for color, _ in feedback):
         print("Solved!")
