@@ -13,14 +13,6 @@ process = subprocess.Popen(
     bufsize=1  # line-buffered
 )
 
-# Load words
-with open("code/words.txt") as file:
-    wordlist = [word.strip() for word in file]
-
-possible_words = wordlist.copy()
-last_guess = None
-used_letters = set()
-
 COLOR_PATTERN = re.compile(r'(\x1b\[\d{2}m)?([A-Z])(\x1b\[0m)?')
 
 def parse_feedback(line, guess):
@@ -100,39 +92,52 @@ def positions_with_variation(possible_words):
     # returns a list of positions (0-4) where possible_words differ
     return [i for i in range(5) if len(set(word[i] for word in possible_words)) > 1]
 
-# Main game loop
-while True:
-    line = process.stdout.readline()
-    if not line:
-        print("Wordle has completed, exiting.")
-        sys.exit()
 
-    print(line, end="")
-    sys.stdout.flush()
+def main():
+    
+    # Load words
+    with open("code/words.txt") as file:
+        wordlist = [word.strip() for word in file]
 
-    # Parse feedback when colors appear
-    if last_guess and any(code in line for code in ["\x1b[42m", "\x1b[43m"]):
-        feedback = parse_feedback(line, last_guess)
-        possible_words = filter_words(possible_words, last_guess, feedback)
+    possible_words = wordlist.copy()
+    last_guess = None
+    used_letters = set()
+    
+    while True:
+        line = process.stdout.readline()
+        if not line:
+            print("Wordle has completed, exiting.")
+            sys.exit()
 
-    # responding when prompted
-    if "Please guess." in line:
-        if last_guess is None:
-            # First guess: maximize information
-            guess = choose_best_guess(possible_words, wordlist, first=True)
-        elif len(possible_words) == 1:
-            guess = possible_words[0]
-        else:
-            pos_var = positions_with_variation(possible_words)
-            # If only 1 or 2 positions vary and more than 2 possible words, probe
-            if len(pos_var) <= 2 and len(possible_words) > 2:
-                guess = get_probe_word(possible_words, wordlist, used_letters)
-                # Avoid repeating a probe word or using a possible answer as probe
-                if guess in used_letters or guess in possible_words:
-                    guess = choose_best_guess(possible_words, wordlist)
+        print(line, end="")
+        sys.stdout.flush()
+
+        # Parse feedback when colors appear
+        if last_guess and any(code in line for code in ["\x1b[42m", "\x1b[43m"]):
+            feedback = parse_feedback(line, last_guess)
+            possible_words = filter_words(possible_words, last_guess, feedback)
+
+        # responding when prompted
+        if "Please guess." in line:
+            if last_guess is None:
+                # First guess: maximize information
+                guess = choose_best_guess(possible_words, wordlist, first=True)
+            elif len(possible_words) == 1:
+                guess = possible_words[0]
             else:
-                guess = choose_best_guess(possible_words, wordlist)
-        last_guess = guess
-        used_letters.update(set(guess))
-        process.stdin.write(guess + "\n")
-        process.stdin.flush()
+                pos_var = positions_with_variation(possible_words)
+                # If only 1 or 2 positions vary and more than 2 possible words, probe
+                if len(pos_var) <= 2 and len(possible_words) > 2:
+                    guess = get_probe_word(possible_words, wordlist, used_letters)
+                    # Avoid repeating a probe word or using a possible answer as probe
+                    if guess in used_letters or guess in possible_words:
+                        guess = choose_best_guess(possible_words, wordlist)
+                else:
+                    guess = choose_best_guess(possible_words, wordlist)
+            last_guess = guess
+            used_letters.update(set(guess))
+            process.stdin.write(guess + "\n")
+            process.stdin.flush()
+            
+if __name__ == "__main__":
+    main()
